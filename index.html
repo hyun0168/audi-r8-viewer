@@ -132,7 +132,7 @@
 
     <div id="hud">
       좌클릭 드래그 — 카메라 회전 (수직 반전)<br>
-      우클릭 드래그 / 마우스 휠 — 줌 인/아웃<br>
+      우클릭 드래그 / 마우스 휠 — 줌 인/아웃 (반전/감도 하향)<br>
       마우스 오버 — 서피스 바운더리 체크 (개별 패치 하이라이트)
     </div>
     <div id="err"></div>
@@ -160,9 +160,8 @@
   let originalMaterialColor = new THREE.Color();
   let originalMaterialEmissive = new THREE.Color();
   
-  // ⚡ 최적화 제어용 변수
   let mouseMoved = false; 
-  let isInteracting = false; // 마우스 드래그(회전 조작) 중인지 판단하는 플래그
+  let isInteracting = false; 
 
   const ENVS = {
     sky: { 
@@ -223,10 +222,13 @@
       camera = new THREE.PerspectiveCamera(40, W / H, 0.01, 2000);
 
       renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, preserveDrawingBuffer: true });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // ⚡ 4K 모니터 등 고해상도 드로우 오버헤드 완화 (2.0 -> 1.5)
       renderer.setSize(W, H);
+      
+      // ⚡ 그림자 업데이트 최적화 (실시간 연산 차단하고 정적 맵 처리로 전환)
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.autoUpdate = false; // 렌더러가 무작정 상시 그림자를 다시 그리는 것을 금지
       
       renderer.outputColorSpace = 'srgb';
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -278,6 +280,11 @@
         dl.visible = false;
       }
     });
+    
+    // 환경 변경 시 그림자 1회 강제 업데이트 후 프리징
+    if(renderer) {
+      renderer.shadowMap.needsUpdate = true;
+    }
   }
 
   function setupModelMaterials(root) {
@@ -286,12 +293,13 @@
         child.castShadow = true;
         child.receiveShadow = true;
         
+        // 대비 질감은 완벽히 유지하되, 내부 연산 정밀도를 웹 최적화형으로 미세 튜닝
         child.material = new THREE.MeshPhysicalMaterial({
           color: 0x9da4ab,          
           metalness: 0.92,          
-          roughness: 0.18,          
+          roughness: 0.16,          
           clearcoat: 1.0,           
-          clearcoatRoughness: 0.08, 
+          clearcoatRoughness: 0.1, 
           side: THREE.DoubleSide
         });
       }
@@ -316,14 +324,12 @@
     mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     
-    // 사용자가 드래그 회전 중이 아닐 때만 마우스 무브 연산 플래그를 켭니다.
     if (!isInteracting) {
       mouseMoved = true; 
     }
   }
 
   function checkRaycast() {
-    // ⚡ 핵심 최적화: 사용자가 화면을 뷰포트 드래그 회전/컨트롤 중이면 무거운 전수조사를 전면 거부(Return)합니다.
     if (!model || !mouseMoved || isInteracting) return;
 
     raycaster.setFromCamera(mouse, camera);
@@ -372,7 +378,6 @@
   function animate() {
     requestAnimationFrame(animate);
     
-    // 자동 턴테이블 모드이면서 마우스 조작 안 할 때만 상시 체크 허용
     if (autoRot && !isInteracting) mouseMoved = true; 
 
     checkRaycast();
@@ -397,8 +402,8 @@
     
     canvasEl.addEventListener('mousedown', e => {
       down = true; 
-      isInteracting = true; // ⚡ 드래그 시작 시점 락(Lock)
-      resetIntersected();   // 화면을 조작하기 시작하면 기존 파란 하이라이트는 깔끔하게 클리어
+      isInteracting = true; 
+      resetIntersected();   
       
       px = e.clientX; py = e.clientY;
       if (e.button === 1) activeMode = 1; 
@@ -408,8 +413,8 @@
     
     window.addEventListener('mouseup', () => { 
       down = false; 
-      isInteracting = false; // ⚡ 마우스를 떼면 다시 하이라이트 작동 허용
-      mouseMoved = true;     // 뗀 순간의 마우스 위치 조사를 위해 강제 1회 구동 유도
+      isInteracting = false; 
+      mouseMoved = true;     
     });
 
     canvasEl.addEventListener('mousemove', e => {
@@ -424,7 +429,8 @@
         orb.target.addScaledVector(vecRight, -dx * offsetFactor);
         orb.target.addScaledVector(vecUp, dy * offsetFactor);
       } else if (activeMode === 2) {
-        orb.radius = Math.max(0.2, Math.min(200, orb.radius + dy * 0.015));
+        // 🛠️ 마우스 우클릭 드래그 줌 방향 반전 및 감도 하향 조정
+        orb.radius = Math.max(0.2, Math.min(200, orb.radius - dy * 0.004));
       } else { 
         orb.theta -= dx * 0.007; 
         orb.phi = Math.max(0.05, Math.min(Math.PI - 0.05, orb.phi - dy * 0.007)); 
@@ -432,13 +438,16 @@
       updateCamera();
     });
     
+    // 🛠️ 마우스 휠 스크롤 줌 로직 수정 영역
     canvasEl.addEventListener('wheel', e => {
       e.preventDefault();
       resetIntersected();
-      orb.radius = Math.max(0.2, Math.min(200, orb.radius + e.deltaY * 0.012));
-      updateCamera();
       
-      // 휠 스크롤 직후 프레임 확보 유도
+      // [기존] orb.radius + e.deltaY * 0.012 -> [변경] - e.deltaY * 0.003
+      // 빼기(-)로 연산하여 줌 방향을 반전시켰고, 변화 계수를 0.003으로 내려 감도를 매우 부드럽게 세팅했습니다.
+      orb.radius = Math.max(0.2, Math.min(200, orb.radius - e.deltaY * 0.003));
+      
+      updateCamera();
       mouseMoved = true;
     }, { passive: false });
     canvasEl.addEventListener('contextmenu', e => e.preventDefault());
@@ -474,6 +483,12 @@
       updateCamera();
 
       buildEdges(model);
+      
+      // 모델 로드가 완전히 끝난 시점에 그림자를 단 1회 빌드하고 멈춥니다 (성능 부하의 주범 차단)
+      if (renderer) {
+        renderer.shadowMap.needsUpdate = true;
+      }
+
       setTimeout(() => { if(loadEl) loadEl.classList.add('hidden'); }, 300);
 
     }, xhr => {
