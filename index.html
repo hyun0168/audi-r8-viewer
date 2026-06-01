@@ -154,39 +154,41 @@
   let model = null, edgeGroup = null;
   let autoRot = true, showPatch = false, envKey = 'sky';
 
-  // 레이캐스팅 연산 변수
   const raycaster = new THREE.Raycaster();
   const mouse = new THREE.Vector2();
   let intersectedMesh = null;
   let originalMaterialColor = new THREE.Color();
   let originalMaterialEmissive = new THREE.Color();
+  
+  let mouseMoved = false; 
 
+  // 💡 메탈릭 대비 극대화를 위해 조명 스펙 강도를 상향 조정 (음영 유지 + 하이라이트 버스트)
   const ENVS = {
     sky: { 
       bg: 0x16171d, 
-      amb: 0.45,
+      amb: 0.55, // 어두운 곳이 묻히지 않도록 베이스 앰비언트 확보
       lights: [
-        { pos: [5, 12, 5], col: 0xffffff, int: 2.0 },
-        { pos: [-6, 4, -5], col: 0x9fb3c8, int: 1.2 },
-        { pos: [0, -8, 0], col: 0x473f35, int: 0.6 }
+        { pos: [6, 14, 6], col: 0xffffff, int: 3.2 }, // 메인 탑 하이라이트선 대폭 강화
+        { pos: [-8, 6, -6], col: 0xaec5dd, int: 1.6 },
+        { pos: [0, -8, 0], col: 0x554c40, int: 0.8 }
       ]
     },
     light: { 
       bg: 0xe6e4e0, 
-      amb: 0.70,
+      amb: 0.80,
       lights: [
-        { pos: [4, 10, 4], col: 0xffffff, int: 1.5 },
-        { pos: [-4, 3, -4], col: 0xded6cb, int: 0.7 },
-        { pos: [0, -6, 0], col: 0xffffff, int: 0.3 }
+        { pos: [5, 12, 5], col: 0xffffff, int: 2.5 },
+        { pos: [-5, 4, -5], col: 0xe5ded5, int: 1.2 },
+        { pos: [0, -6, 0], col: 0xffffff, int: 0.5 }
       ]
     },
     dark: { 
       bg: 0x07070a, 
-      amb: 0.15,
+      amb: 0.25,
       lights: [
-        { pos: [3, 6, 3], col: 0xe5ceb8, int: 1.8 },
-        { pos: [-5, 2, -3], col: 0x53667c, int: 1.0 },
-        { pos: [0, 6, -5], col: 0xffffff, int: 0.6 }
+        { pos: [4, 8, 4], col: 0xffe6cd, int: 3.0 },
+        { pos: [-6, 3, -4], col: 0x647b96, int: 1.5 },
+        { pos: [0, 8, -6], col: 0xffffff, int: 1.0 }
       ]
     }
   };
@@ -226,313 +228,6 @@
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       
       renderer.outputColorSpace = 'srgb';
+      
+      // 🛠️ 밝은 곳의 한계치를 높여 뭉개짐 없이 하이라이트 대비를 찢어주는 익스포저 튜닝
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.2;
-
-      ambLight = new THREE.AmbientLight(0xffffff, 0.4);
-      scene.add(ambLight);
-
-      for (let i = 0; i < 3; i++) {
-        let dl = new THREE.DirectionalLight(0xffffff, 1.0);
-        if(i === 0) {
-          dl.castShadow = true;
-          dl.shadow.mapSize.width = 2048;
-          dl.shadow.mapSize.height = 2048;
-          dl.shadow.bias = -0.0002;
-        }
-        scene.add(dl);
-        dynamicLights.push(dl);
-      }
-
-      applyEnv();
-      updateCamera();
-      animate();
-      onResize();
-      window.addEventListener('resize', onResize);
-      bindOrbit();
-
-      window.addEventListener('mousemove', onMouseMove, false);
-
-      loadGLB('audi.glb');
-    } catch (e) {
-      console.error(e);
-      showErr('뷰어 초기화 실패');
-    }
-  }
-
-  function applyEnv() {
-    const e = ENVS[envKey];
-    if(scene) scene.background = new THREE.Color(e.bg);
-    if(ambLight) ambLight.intensity = e.amb;
-    
-    dynamicLights.forEach((dl, idx) => {
-      if(e.lights[idx]) {
-        dl.position.set(...e.lights[idx].pos);
-        dl.color.set(e.lights[idx].col);
-        dl.intensity = e.lights[idx].int;
-        dl.visible = true;
-      } else {
-        dl.visible = false;
-      }
-    });
-  }
-
-  function setupModelMaterials(root) {
-    root.traverse(child => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-        if (child.material) {
-          child.material.side = THREE.DoubleSide;
-        }
-      }
-    });
-  }
-
-  function updateCamera() {
-    if(!camera) return;
-    const { theta, phi, radius, target } = orb;
-    const sp = Math.sin(phi);
-    
-    camera.position.set(
-      radius * sp * Math.sin(theta) + target.x,
-      radius * Math.cos(phi)        + target.y,
-      radius * sp * Math.cos(theta) + target.z
-    );
-    camera.lookAt(target);
-  }
-
-  function onMouseMove(event) {
-    const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-  }
-
-  // 🛠️ 개별 서피스 정밀 레이캐스팅 연산부 (핵심 수정 완료)
-  function checkRaycast() {
-    if (!model) return;
-
-    raycaster.setFromCamera(mouse, camera);
-    
-    // model 내부의 모든 하위 노드(개별 메쉬 조각들)를 정밀 전수조사합니다.
-    const intersects = raycaster.intersectObjects(model.children, true);
-
-    if (intersects.length > 0) {
-      // 최상위 그룹이 아닌 마우스 커서가 실제로 충돌한 '단 하나의 Mesh'를 낚아챕니다.
-      const topMesh = intersects[0].object;
-
-      if (topMesh.isMesh && intersectedMesh !== topMesh) {
-        resetIntersected();
-        intersectedMesh = topMesh;
-        
-        if (intersectedMesh.material) {
-          // 공유 재질 간섭을 피하기 위해 닿은 서피스 고유의 머티리얼을 독립적으로 Clone 처리합니다.
-          if (!intersectedMesh.userData.originalMaterial) {
-            intersectedMesh.userData.originalMaterial = intersectedMesh.material;
-            intersectedMesh.material = intersectedMesh.material.clone();
-          }
-
-          originalMaterialColor.copy(intersectedMesh.material.color);
-          if (intersectedMesh.material.emissive) {
-            originalMaterialEmissive.copy(intersectedMesh.material.emissive);
-          }
-
-          // 🔥 마우스가 위치한 정확한 서피스 조각 한 장만 파란색 하이라이트 주입
-          intersectedMesh.material.color.setHex(0x2277ff);
-          if (intersectedMesh.material.emissive) {
-            intersectedMesh.material.emissive.setHex(0x0a1a44); // 은은한 발광 레이어 추가
-          }
-        }
-      }
-    } else {
-      resetIntersected();
-    }
-  }
-
-  function resetIntersected() {
-    if (intersectedMesh && intersectedMesh.material) {
-      intersectedMesh.material.color.copy(originalMaterialColor);
-      if (intersectedMesh.material.emissive) {
-        intersectedMesh.material.emissive.copy(originalMaterialEmissive);
-      }
-      intersectedMesh = null;
-    }
-  }
-
-  function animate() {
-    requestAnimationFrame(animate);
-    checkRaycast();
-
-    if (autoRot && model) {
-      model.rotation.y += 0.002;
-      if (edgeGroup) edgeGroup.rotation.y = model.rotation.y;
-    }
-    if(renderer && scene && camera) renderer.render(scene, camera);
-  }
-
-  function onResize() {
-    if(!camera || !renderer || !wrap) return;
-    const W = wrap.clientWidth || window.innerWidth;
-    const H = wrap.clientHeight || window.innerHeight;
-    camera.aspect = W / H; camera.updateProjectionMatrix();
-    renderer.setSize(W, H);
-  }
-
-  function bindOrbit() {
-    let down = false; let activeMode = 0; let px = 0, py = 0;
-    
-    canvasEl.addEventListener('mousedown', e => {
-      down = true; px = e.clientX; py = e.clientY;
-      if (e.button === 1) activeMode = 1; 
-      else if (e.button === 2) activeMode = 2; 
-      else { activeMode = 0; autoRot = false; if(btnAuto) btnAuto.classList.remove('on'); }
-    });
-    
-    window.addEventListener('mouseup', () => { down = false; });
-    canvasEl.addEventListener('mousemove', e => {
-      if (!down) return;
-      const dx = e.clientX - px, dy = e.clientY - py;
-      px = e.clientX; py = e.clientY;
-      
-      if (activeMode === 1) { 
-        const offsetFactor = 0.0016 * orb.radius;
-        const vecRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-        const vecUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-        orb.target.addScaledVector(vecRight, -dx * offsetFactor);
-        orb.target.addScaledVector(vecUp, dy * offsetFactor);
-      } else if (activeMode === 2) {
-        orb.radius = Math.max(0.2, Math.min(200, orb.radius + dy * 0.015));
-      } else { 
-        orb.theta -= dx * 0.007; 
-        orb.phi = Math.max(0.05, Math.min(Math.PI - 0.05, orb.phi - dy * 0.007)); 
-      }
-      updateCamera();
-    });
-    
-    canvasEl.addEventListener('wheel', e => {
-      e.preventDefault();
-      orb.radius = Math.max(0.2, Math.min(200, orb.radius + e.deltaY * 0.012));
-      updateCamera();
-    }, { passive: false });
-    canvasEl.addEventListener('contextmenu', e => e.preventDefault());
-  }
-
-  function loadGLB(path) {
-    let prog = 0;
-    const ticker = setInterval(() => { prog = Math.min(prog + 4, 90); if(loadFill) loadFill.style.width = prog + '%'; }, 100);
-
-    const loader = new THREE.GLTFLoader();
-    const dracoLoader = new THREE.DRACOLoader();
-    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
-    loader.setDRACOLoader(dracoLoader);
-
-    loader.load(path, gltf => {
-      clearInterval(ticker);
-      if(loadFill) loadFill.style.width = '100%';
-
-      model = gltf.scene;
-      setupModelMaterials(model);
-
-      const box  = new THREE.Box3().setFromObject(model);
-      const ctr  = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      const maxD = Math.max(size.x, size.y, size.z);
-      const sc   = 3.5 / maxD;
-      
-      model.position.sub(ctr).multiplyScalar(sc);
-      model.scale.setScalar(sc);
-      scene.add(model);
-
-      orb.radius = 5; orb.target.set(0, 0, 0); orb.theta = 0.5; orb.phi = 1.05;
-      updateCamera();
-
-      buildEdges(model);
-      setTimeout(() => { if(loadEl) loadEl.classList.add('hidden'); }, 300);
-
-    }, xhr => {
-      if (xhr.total && loadFill) { prog = Math.round(xhr.loaded / xhr.total * 90); loadFill.style.width = prog + '%'; }
-    }, err => {
-      clearInterval(ticker);
-      console.error(err);
-      showErr('모델 로드 실패: 레포지토리 내 파일 형식을 다시 확인해 주세요.');
-    });
-  }
-
-  function buildEdges(root) {
-    if (edgeGroup) { scene.remove(edgeGroup); edgeGroup = null; }
-    edgeGroup = new THREE.Group();
-
-    root.traverse(child => {
-      if (!child.isMesh) return;
-      
-      const edges = new THREE.EdgesGeometry(child.geometry, 15);
-      
-      // 검은 검정색 + 시인성을 위해 4배 강화된 패치라인 두께 세팅
-      const mat = new THREE.LineBasicMaterial({ 
-        color: 0x000000,
-        transparent: false,
-        linewidth: 8,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2
-      });
-      
-      const lines = new THREE.LineSegments(edges, mat);
-      lines.renderOrder = 9999;
-      lines.position.copy(child.position);
-      lines.rotation.copy(child.rotation);
-      lines.scale.copy(child.scale);
-      edgeGroup.add(lines);
-    });
-
-    edgeGroup.position.copy(root.position);
-    edgeGroup.rotation.copy(root.rotation);
-    edgeGroup.scale.copy(root.scale);
-    edgeGroup.visible = showPatch;
-    scene.add(edgeGroup);
-  }
-
-  if(btnAuto) btnAuto.addEventListener('click', () => { autoRot = !autoRot; btnAuto.classList.toggle('on', autoRot); });
-  if(btnPatch) btnPatch.addEventListener('click', () => {
-    showPatch = !showPatch;
-    btnPatch.classList.toggle('on', showPatch);
-    if (edgeGroup) edgeGroup.visible = showPatch;
-  });
-  
-  if(btnReset) btnReset.addEventListener('click', () => {
-    if (!model) return;
-    resetIntersected();
-    orb.radius = 5; orb.target.set(0, 0, 0); orb.theta = 0.5; orb.phi = 1.05;
-    model.rotation.set(0, 0, 0);
-    if (edgeGroup) edgeGroup.rotation.set(0, 0, 0);
-    updateCamera();
-    autoRot = true; if(btnAuto) btnAuto.classList.add('on');
-  });
-  
-  if(btnShot) btnShot.addEventListener('click', () => {
-    if(!renderer || !scene || !camera) return;
-    resetIntersected();
-    renderer.render(scene, camera);
-    const a = document.createElement('a');
-    a.download = 'audi_r8_inspection.png';
-    a.href = canvasEl.toDataURL('image/png');
-    a.click();
-  });
-
-  document.querySelectorAll('.edot').forEach(dot => {
-    dot.addEventListener('click', function () {
-      document.querySelectorAll('.edot').forEach(d => d.classList.remove('on'));
-      this.classList.add('on');
-      envKey = this.dataset.env;
-      applyEnv();
-    });
-  });
-
-  function showErr(msg) { if(errEl) { errEl.textContent = msg; errEl.style.display = 'block'; } }
-
-  if (document.readyState === 'complete' || document.readyState === 'interactive') { init(); }
-  else { document.addEventListener('DOMContentLoaded', init); }
-})();
-</script>
-</body>
-</html>
