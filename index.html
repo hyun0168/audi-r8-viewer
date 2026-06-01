@@ -147,7 +147,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
 <script>
 (function () {
   let scene, camera, renderer;
@@ -172,7 +171,6 @@
 
   let ambLight, dirLight1, dirLight2;
   
-  // 회전 중심축을 동적으로 제어하기 위해 3차원 Vector 구조(target)로 관리 구조를 변경합니다.
   const orb = { 
     theta: 0.5, 
     phi: 1.05, 
@@ -234,7 +232,6 @@
     if(dirLight2) dirLight2.color.set(e.dir2);
   }
 
-  // 회전 중심(orb.target)을 기준으로 구면 좌표계를 실시간 매핑하는 완전 변형 함수
   function updateCamera() {
     if(!camera) return;
     const { theta, phi, radius, target } = orb;
@@ -275,11 +272,11 @@
       px = e.clientX; py = e.clientY;
       
       if (e.button === 1) {
-        activeMode = 1; // 패닝 (가운데 휠 드래그)
+        activeMode = 1; 
       } else if (e.button === 2) {
-        activeMode = 2; // 줌 (우클릭 드래그)
+        activeMode = 2; 
       } else {
-        activeMode = 0; // 회전 (좌클릭 드래그)
+        activeMode = 0; 
         autoRot = false; 
         if(btnAuto) btnAuto.classList.remove('on'); 
       }
@@ -293,7 +290,6 @@
       px = e.clientX; py = e.clientY;
       
       if (activeMode === 1) { 
-        // 🛠️ 카메라 정면/우측 벡터를 기반으로 마우스 드래그 방향에 맞춰 Target을 직접 이동시킵니다.
         const offsetFactor = 0.0016 * orb.radius;
         const vecRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
         const vecUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
@@ -322,16 +318,14 @@
     let prog = 0;
     const ticker = setInterval(() => { prog = Math.min(prog + 3, 90); if(loadFill) loadFill.style.width = prog + '%'; }, 130);
 
-    if (typeof THREE.GLTFLoader !== 'function' || typeof THREE.DRACOLoader !== 'function') {
+    if (typeof THREE.GLTFLoader !== 'function') {
       clearInterval(ticker);
       showErr('로더 구성 요소를 찾을 수 없습니다.');
       return;
     }
 
+    // CAD Assistant 표준 규격 파일 파싱을 위해 순수 구조로 복원 (Draco 세팅 비활성화)
     const loader = new THREE.GLTFLoader();
-    const dracoLoader = new THREE.DRACOLoader();
-    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.4.3/');
-    loader.setDRACOLoader(dracoLoader);
 
     loader.load(path, gltf => {
       clearInterval(ticker);
@@ -366,10 +360,11 @@
     }, err => {
       clearInterval(ticker);
       console.error(err);
-      showErr('모델 파일 리딩 실패. 경로 및 확장자를 확인하세요.');
+      showErr('모델 로딩에 실패했습니다. 파일 형식을 다시 확인해 주세요.');
     });
   }
 
+  // 🛠️ CAD Assistant 전용 서피스 경계선 연산 최적화 매핑 구조
   function buildEdges(root) {
     if (edgeGroup) { scene.remove(edgeGroup); edgeGroup = null; }
     edgeGroup = new THREE.Group();
@@ -377,17 +372,17 @@
     root.traverse(child => {
       if (!child.isMesh) return;
       
-      const edges = new THREE.EdgesGeometry(child.geometry, 40);
+      // CAD Assistant에서 뜯어낸 정밀 지오메트리 엣지 추출 (결합되지 않은 면 경계를 날카롭게 캡처하기 위해 각도를 15도로 강화)
+      const edges = new THREE.EdgesGeometry(child.geometry, 15);
       
-      // 🛠️ 1번 요구사항 반영: 두께를 선명하게 2배 더 확장 (linewidth: 2 -> 4)
       const mat = new THREE.LineBasicMaterial({ 
         color: 0xb8a898, 
         transparent: true, 
         opacity: 0.95,
         linewidth: 4, 
         polygonOffset: true,
-        polygonOffsetFactor: -2, 
-        polygonOffsetUnits: -2
+        polygonOffsetFactor: -1, // 면 경계가 분리되어 생성되었으므로 아주 얇게 밀착 처리
+        polygonOffsetUnits: -1
       });
       
       const lines = new THREE.LineSegments(edges, mat);
