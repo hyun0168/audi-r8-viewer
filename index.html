@@ -10,8 +10,8 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg: #0c0c10;
-    --surface: #13131a;
+    --bg: #16171d; /* 스카이 셰이더 분위기에 맞춘 기본 배경색 */
+    --surface: #1d1e26;
     --border: rgba(255,255,255,0.07);
     --accent: #b8a898;
     --accent-dim: rgba(184,168,152,0.45);
@@ -94,7 +94,7 @@
     height:36px; display:flex; align-items:center; justify-content:space-between;
     padding:0 20px;
     border-top:0.5px solid var(--border);
-    background:rgba(10,10,14,0.95);
+    background:rgba(22:17:23,0.95);
     flex-shrink:0; z-index:20;
   }
   #bottombar span { font-size:10px; color:var(--text-dim); letter-spacing:0.05em; }
@@ -106,12 +106,12 @@
   <div id="topbar">
     <div id="logo">ALIAS 3D VIEWER</div>
     <div class="div"></div>
-    <div id="model-name">Audi R8 — Practice Modeling</div>
+    <div id="model-name">Audi R8 — OBJ/Blender Optimized Model</div>
     <div id="btn-group">
       <div id="env-dots">
-        <div class="edot on" style="background:#1a1b22;" data-env="sky" title="스카이 셰이더"></div>
-        <div class="edot" style="background:#e0deda;" data-env="light" title="라이트 클레이"></div>
-        <div class="edot" style="background:#0a0a0f;" data-env="dark" title="다크 몽환"></div>
+        <div class="edot on" style="background:#16171d;" data-env="sky" title="스카이 모드"></div>
+        <div class="edot" style="background:#e6e4e0;" data-env="light" title="라이트 스튜디오"></div>
+        <div class="edot" style="background:#07070a;" data-env="dark" title="다크 몽환"></div>
       </div>
       <div class="div" style="margin:0 2px;"></div>
       <button class="btn on" id="btn-auto">AUTO ROT</button>
@@ -126,12 +126,12 @@
 
     <div id="loading">
       <div id="load-title">AUDI R8</div>
-      <div id="load-label">LOADING MODEL...</div>
+      <div id="load-label">LOADING COMPRESSED MODEL...</div>
       <div id="load-track"><div id="load-fill"></div></div>
     </div>
 
     <div id="hud">
-      좌클릭 드래그 — 카메라 회전<br>
+      좌클릭 드래그 — 카메라 회전 (마우스 수직 반전 적용)<br>
       우클릭 드래그 / 마우스 휠 스크롤 — 줌 인 / 아웃<br>
       휠 버튼(가운데) 클릭 드래그 — 화면 이동 (Panning)
     </div>
@@ -139,7 +139,7 @@
   </div>
 
   <div id="bottombar">
-    <span>Powered by Three.js</span>
+    <span>Powered by Three.js & Draco Compression</span>
     <span>ALIAS Surface Modeling Practice</span>
   </div>
 
@@ -147,39 +147,40 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
 <script>
 (function () {
   let scene, camera, renderer;
   let model = null, edgeGroup = null;
   let autoRot = true, showPatch = false, envKey = 'sky';
 
-  // 🛠️ ALIAS의 덩어리감(Shade Sky) 조명 매트릭스 구현을 위한 세팅 데이터
+  // 💡 블렌더에서 넘어온 원본 재질 컬러를 극대화해주는 환경별 3방향 돔 라이팅 구성
   const ENVS = {
     sky: { 
       bg: 0x16171d, 
-      amb: 0.40,
+      amb: 0.45,
       lights: [
-        { pos: [5, 10, 5], col: 0xffffff, int: 1.8 },   // 메인 스카이 조명 (탑)
-        { pos: [-6, 3, -5], col: 0x8fa1b5, int: 1.1 },  // 은은한 하늘빛 반사 조명 (사이드)
-        { pos: [0, -8, 0], col: 0x3d352e, int: 0.7 }    // 지면 반사광 (그라운드 바운스)
+        { pos: [5, 12, 5], col: 0xffffff, int: 2.0 },   // 메인 하이라이트 탑 라이트
+        { pos: [-6, 4, -5], col: 0x9fb3c8, int: 1.2 },  // 은은한 하늘빛 사이드 반사광
+        { pos: [0, -8, 0], col: 0x473f35, int: 0.6 }    // 지면 언더 바운스광
       ]
     },
     light: { 
       bg: 0xe6e4e0, 
-      amb: 0.75,
+      amb: 0.70,
       lights: [
-        { pos: [4, 8, 4], col: 0xffffff, int: 1.2 },
-        { pos: [-4, 2, -4], col: 0xd8d4cc, int: 0.6 },
-        { pos: [0, -5, 0], col: 0xffffff, int: 0.3 }
+        { pos: [4, 10, 4], col: 0xffffff, int: 1.5 },
+        { pos: [-4, 3, -4], col: 0xded6cb, int: 0.7 },
+        { pos: [0, -6, 0], col: 0xffffff, int: 0.3 }
       ]
     },
     dark: { 
       bg: 0x07070a, 
       amb: 0.15,
       lights: [
-        { pos: [3, 5, 3], col: 0xd9c3b0, int: 1.6 },
-        { pos: [-5, 1, -3], col: 0x485666, int: 0.9 },
-        { pos: [0, 6, -5], col: 0xffffff, int: 0.5 }
+        { pos: [3, 6, 3], col: 0xe5ceb8, int: 1.8 },
+        { pos: [-5, 2, -3], col: 0x53667c, int: 1.0 },
+        { pos: [0, 6, -5], col: 0xffffff, int: 0.6 }
       ]
     }
   };
@@ -220,9 +221,8 @@
       
       renderer.outputColorSpace = 'srgb';
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.1;
+      renderer.toneMappingExposure = 1.2;
 
-      // 조명 초기 레이아웃 생성
       ambLight = new THREE.AmbientLight(0xffffff, 0.4);
       scene.add(ambLight);
 
@@ -245,6 +245,7 @@
       window.addEventListener('resize', onResize);
       bindOrbit();
 
+      // 파일 로드 시작
       loadGLB('audi_r8_modeling_1-19_GLB2.glb');
     } catch (e) {
       console.error(e);
@@ -252,7 +253,6 @@
     }
   }
 
-  // 🛠️ 조명 세팅과 매질의 밝기 변화 밸런스 조정
   function applyEnv() {
     const e = ENVS[envKey];
     if(scene) scene.background = new THREE.Color(e.bg);
@@ -268,42 +268,23 @@
         dl.visible = false;
       }
     });
-
-    // 이미 로드된 모델이 있다면 재질 실시간 실장 변경
-    if (model) {
-      updateModelMaterial(model);
-    }
   }
 
-  // 🛠️ 중요: CAD Assistant 특유의 검은색 메탈릭 속성을 지워버리고 은은한 스카이 셰이더 매트 질감으로 강제 치환
-  function updateModelMaterial(root) {
+  // 🛠️ 중요: 데이터 상의 재질을 파괴하지 않고, 셰이딩 품질(그림자 수신 및 양면 렌더링)만 업그레이드
+  function setupModelMaterials(root) {
     root.traverse(child => {
       if (child.isMesh) {
         child.castShadow = true;
         child.receiveShadow = true;
-        
-        // 투명 부품(글라스류) 식별 및 투명도 유지 처리
-        const nameLower = child.name.toLowerCase();
-        const isGlass = nameLower.includes('glass') || nameLower.includes('window') || nameLower.includes('lens');
 
-        if (isGlass) {
-          child.material = new THREE.MeshPhysicalMaterial({
-            color: 0x333b45,
-            roughness: 0.1,
-            metalness: 0.1,
-            transparent: true,
-            opacity: 0.4,
-            transmission: 0.6,
-            side: THREE.DoubleSide
-          });
-        } else {
-          // 일반 차체 판넬: Alias 검토용 'Shade Sky' 특유의 세미 매트 그레이 서피스 구현
-          child.material = new THREE.MeshStandardMaterial({
-            color: envKey === 'light' ? 0x9e9b96 : 0x5a616a, // 셰이더 베이스 컬러
-            roughness: 0.43,         // 빛이 뭉개지며 퍼지는 정도 (매우 중요)
-            metalness: 0.18,         // 은은한 금속성 느낌 가미
-            side: THREE.DoubleSide
-          });
+        if (child.material) {
+          // 블렌더에서 추출된 고유 재질 속성을 완벽히 보존
+          child.material.side = THREE.DoubleSide; // 서피스 뒤집힘 현상 방지
+          
+          // 만약 블렌더에서 입혀온 재질이 너무 매트하거나 반사가 부족하다면 
+          // 아래 두 라인의 주석을 해제하여 미세 조율이 가능합니다.
+          // child.material.roughness = Math.max(child.material.roughness, 0.35);
+          // child.material.metalness = Math.max(child.material.metalness, 0.2);
         }
       }
     });
@@ -339,6 +320,7 @@
     renderer.setSize(W, H);
   }
 
+  // 🛠️ 마우스 수직 조작 반전(Invert Y) 로직이 온전하게 튜닝된 파트
   function bindOrbit() {
     let down = false; let activeMode = 0; let px = 0, py = 0;
     
@@ -364,7 +346,9 @@
       } else if (activeMode === 2) {
         orb.radius = Math.max(0.2, Math.min(200, orb.radius + dy * 0.015));
       } else { 
-        orb.theta -= dx * 0.007; orb.phi = Math.max(0.05, Math.min(Math.PI - 0.05, orb.phi + dy * 0.007)); 
+        // 🔄 수직 회전 조작 반전 처리: 마우스를 밑으로 당길 때(dy > 0) phi 값이 줄어들어 카메라가 루프 방향(위)으로 궤적 이동
+        orb.theta -= dx * 0.007; 
+        orb.phi = Math.max(0.05, Math.min(Math.PI - 0.05, orb.phi - dy * 0.007)); 
       }
       updateCamera();
     });
@@ -379,17 +363,23 @@
 
   function loadGLB(path) {
     let prog = 0;
-    const ticker = setInterval(() => { prog = Math.min(prog + 3, 90); if(loadFill) loadFill.style.width = prog + '%'; }, 130);
+    const ticker = setInterval(() => { prog = Math.min(prog + 4, 90); if(loadFill) loadFill.style.width = prog + '%'; }, 100);
 
     const loader = new THREE.GLTFLoader();
+    
+    // 📦 블렌더에서 압축한 Draco GLB 파일을 웹 브라우저에서 풀 수 있도록 디코더 세팅 결합
+    const dracoLoader = new THREE.DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+    loader.setDRACOLoader(dracoLoader);
+
     loader.load(path, gltf => {
       clearInterval(ticker);
       if(loadFill) loadFill.style.width = '100%';
 
       model = gltf.scene;
       
-      // 불러온 데이터에 커스텀 스카이 셰이더 재질 주입
-      updateModelMaterial(model);
+      // 원본 재질 속성 복원 셋업 함수 호출
+      setupModelMaterials(model);
 
       const box  = new THREE.Box3().setFromObject(model);
       const ctr  = box.getCenter(new THREE.Vector3());
@@ -405,14 +395,14 @@
       updateCamera();
 
       buildEdges(model);
-      setTimeout(() => { if(loadEl) loadEl.classList.add('hidden'); }, 400);
+      setTimeout(() => { if(loadEl) loadEl.classList.add('hidden'); }, 300);
 
     }, xhr => {
       if (xhr.total && loadFill) { prog = Math.round(xhr.loaded / xhr.total * 90); loadFill.style.width = prog + '%'; }
     }, err => {
       clearInterval(ticker);
       console.error(err);
-      showErr('모델 파일 형식을 파싱하지 못했습니다.');
+      showErr('모델 로드 실패: 파일명 혹은 압축 디코더 링크를 확인하세요.');
     });
   }
 
@@ -425,9 +415,9 @@
       
       const edges = new THREE.EdgesGeometry(child.geometry, 15);
       const mat = new THREE.LineBasicMaterial({ 
-        color: 0xa0a5b5, // 패치 경계 라인이 스카이 배경에 잘 어우러지도록 정돈
+        color: 0x9095a5, 
         transparent: true, 
-        opacity: 0.8,
+        opacity: 0.5,
         polygonOffset: true,
         polygonOffsetFactor: -1,
         polygonOffsetUnits: -1
@@ -468,7 +458,7 @@
     if(!renderer || !scene || !camera) return;
     renderer.render(scene, camera);
     const a = document.createElement('a');
-    a.download = 'audi_r8_shade_sky.png';
+    a.download = 'audi_r8_capture.png';
     a.href = canvasEl.toDataURL('image/png');
     a.click();
   });
