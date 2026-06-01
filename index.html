@@ -147,6 +147,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
 <script>
 (function () {
   let scene, camera, renderer;
@@ -175,7 +176,7 @@
   function init() {
     try {
       if (typeof THREE === 'undefined') {
-        showErr('Three.js 엔진이 로드되지 않았습니다. CDN 연결을 확인하세요.');
+        showErr('엔진 로드 실패');
         return;
       }
       
@@ -190,11 +191,7 @@
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       
-      if (renderer.outputEncoding !== undefined) {
-        renderer.outputEncoding = THREE.sRGBEncoding;
-      } else {
-        renderer.outputColorSpace = 'srgb';
-      }
+      renderer.outputColorSpace = 'srgb';
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.15;
 
@@ -218,7 +215,7 @@
       loadGLB('audi_r8_modeling_1-19_GLB2.glb');
     } catch (e) {
       console.error(e);
-      showErr('뷰어 시스템 초기화 실패');
+      showErr('뷰어 초기화 실패');
     }
   }
 
@@ -287,13 +284,19 @@
     let prog = 0;
     const ticker = setInterval(() => { prog = Math.min(prog + 3, 90); if(loadFill) loadFill.style.width = prog + '%'; }, 130);
 
-    if (typeof THREE.GLTFLoader !== 'function') {
+    if (typeof THREE.GLTFLoader !== 'function' || typeof THREE.DRACOLoader !== 'function') {
       clearInterval(ticker);
-      showErr('GLTFLoader가 정상적으로 주입되지 않았습니다.');
+      showErr('로더 구성 요소를 찾을 수 없습니다.');
       return;
     }
 
     const loader = new THREE.GLTFLoader();
+    
+    // 구글 CDN을 통해 Draco 압축 해제기(Decoder) 연동 설정
+    const dracoLoader = new THREE.DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.4.3/');
+    loader.setDRACOLoader(dracoLoader);
+
     loader.load(path, gltf => {
       clearInterval(ticker);
       if(loadFill) loadFill.style.width = '100%';
