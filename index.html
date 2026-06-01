@@ -157,7 +157,7 @@
   const ENVS = {
     dark:   { bg: 0x0e0e14, amb: 0.55, dir1: 0xffffff, dir2: 0xc0b8b0 },
     light:  { bg: 0xdcd8d0, amb: 0.80, dir1: 0xffffff, dir2: 0xe8e0d8 },
-    studio: { bg: 0x141c14, amb: 0.50, dir1: 0xffffff, dir2: 0xa0c0a0 },
+    studio: { bg: 0x141c14, amb: 0.50, dir1: 0xffffff, dir2: 0xa0c0a0 }
   };
 
   const canvasEl  = document.getElementById('three-canvas');
@@ -221,4 +221,200 @@
 
   function applyEnv() {
     const e = ENVS[envKey];
-    if(scene) scene.background = new
+    if(scene) scene.background = new THREE.Color(e.bg);
+    if(ambLight) ambLight.intensity = e.amb;
+    if(dirLight1) dirLight1.color.set(e.dir1);
+    if(dirLight2) dirLight2.color.set(e.dir2);
+  }
+
+  function updateCamera() {
+    if(!camera) return;
+    const { theta, phi, radius, panX, panY } = orb;
+    const sp = Math.sin(phi);
+    camera.position.set(
+      radius * sp * Math.sin(theta) + panX,
+      radius * Math.cos(phi)        + panY,
+      radius * sp * Math.cos(theta)
+    );
+    camera.lookAt(panX, panY, 0);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    if (autoRot && model) {
+      model.rotation.y += 0.003;
+      if (edgeGroup) edgeGroup.rotation.y = model.rotation.y;
+    }
+    if(renderer && scene && camera) renderer.render(scene, camera);
+  }
+
+  function onResize() {
+    if(!camera || !renderer || !wrap) return;
+    const W = wrap.clientWidth || window.innerWidth;
+    const H = wrap.clientHeight || window.innerHeight;
+    camera.aspect = W / H; camera.updateProjectionMatrix();
+    renderer.setSize(W, H);
+  }
+
+  function bindOrbit() {
+    let down = false;
+    let activeMode = 0; 
+    let px = 0, py = 0;
+    
+    canvasEl.addEventListener('mousedown', e => {
+      down = true;
+      px = e.clientX; py = e.clientY;
+      
+      if (e.button === 1) {
+        activeMode = 1; 
+      } else if (e.button === 2) {
+        activeMode = 2; 
+      } else {
+        activeMode = 0; 
+        autoRot = false; 
+        if(btnAuto) btnAuto.classList.remove('on'); 
+      }
+    });
+    
+    window.addEventListener('mouseup', () => { down = false; });
+    
+    window.addEventListener('mousemove', e => {
+      if (!down) return;
+      const dx = e.clientX - px, dy = e.clientY - py;
+      px = e.clientX; py = e.clientY;
+      
+      if (activeMode === 1) { 
+        orb.panX -= dx * 0.0025 * (orb.radius / 4); 
+        orb.panY += dy * 0.0025 * (orb.radius / 4); 
+      } else if (activeMode === 2) {
+        orb.radius = Math.max(0.2, Math.min(200, orb.radius + dy * 0.015));
+      } else { 
+        orb.theta -= dx * 0.007; 
+        orb.phi = Math.max(0.05, Math.min(Math.PI - 0.05, orb.phi + dy * 0.007)); 
+      }
+      updateCamera();
+    });
+    
+    canvasEl.addEventListener('wheel', e => {
+      e.preventDefault();
+      orb.radius = Math.max(0.2, Math.min(200, orb.radius + e.deltaY * 0.012));
+      updateCamera();
+    }, { passive: false });
+    
+    canvasEl.addEventListener('contextmenu', e => e.preventDefault());
+  }
+
+  function loadGLB(path) {
+    let prog = 0;
+    const ticker = setInterval(() => { prog = Math.min(prog + 3, 90); if(loadFill) loadFill.style.width = prog + '%'; }, 130);
+
+    if (typeof THREE.GLTFLoader !== 'function' || typeof THREE.DRACOLoader !== 'function') {
+      clearInterval(ticker);
+      showErr('로더 구성 요소를 찾을 수 없습니다.');
+      return;
+    }
+
+    const loader = new THREE.GLTFLoader();
+    const dracoLoader = new THREE.DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.4.3/');
+    loader.setDRACOLoader(dracoLoader);
+
+    loader.load(path, gltf => {
+      clearInterval(ticker);
+      if(loadFill) loadFill.style.width = '100%';
+
+      model = gltf.scene;
+      
+      model.traverse(child => {
+        if (child.isMesh && child.material) {
+          child.material.side = THREE.DoubleSide;
+        }
+      });
+
+      const box  = new THREE.Box3().setFromObject(model);
+      const ctr  = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const maxD = Math.max(size.x, size.y, size.z);
+      const sc   = 3.5 / maxD;
+      model.position.sub(ctr).multiplyScalar(sc);
+      model.scale.setScalar(sc);
+      scene.add(model);
+
+      orb.radius = 5; orb.panX = 0; orb.panY = 0;
+      orb.theta = 0.5; orb.phi = 1.05;
+      updateCamera();
+
+      buildEdges(model);
+      setTimeout(() => { if(loadEl) loadEl.classList.add('hidden'); }, 400);
+
+    }, xhr => {
+      if (xhr.total && loadFill) { prog = Math.round(xhr.loaded / xhr.total * 90); loadFill.style.width = prog + '%'; }
+    }, err => {
+      clearInterval(ticker);
+      console.error(err);
+      showErr('모델 파일 리딩 실패. 경로 및 확장자를 확인하세요.');
+    });
+  }
+
+  function buildEdges(root) {
+    if (edgeGroup) { scene.remove(edgeGroup); edgeGroup = null; }
+    edgeGroup = new THREE.Group();
+
+    root.traverse(child => {
+      if (!child.isMesh) return;
+      const edges = new THREE.EdgesGeometry(child.geometry, 15);
+      const mat   = new THREE.LineBasicMaterial({ color: 0xb8a898, transparent: true, opacity: 0.65 });
+      const lines = new THREE.LineSegments(edges, mat);
+      lines.position.copy(child.position);
+      lines.rotation.copy(child.rotation);
+      lines.scale.copy(child.scale);
+      edgeGroup.add(lines);
+    });
+
+    edgeGroup.position.copy(root.position);
+    edgeGroup.rotation.copy(root.rotation);
+    edgeGroup.scale.copy(root.scale);
+    edgeGroup.visible = showPatch;
+    scene.add(edgeGroup);
+  }
+
+  if(btnAuto) btnAuto.addEventListener('click', () => { autoRot = !autoRot; btnAuto.classList.toggle('on', autoRot); });
+  if(btnPatch) btnPatch.addEventListener('click', () => {
+    showPatch = !showPatch;
+    btnPatch.classList.toggle('on', showPatch);
+    if (edgeGroup) edgeGroup.visible = showPatch;
+  });
+  if(btnReset) btnReset.addEventListener('click', () => {
+    if (!model) return;
+    orb.radius = 5; orb.panX = 0; orb.panY = 0; orb.theta = 0.5; orb.phi = 1.05;
+    model.rotation.set(0, 0, 0);
+    if (edgeGroup) edgeGroup.rotation.set(0, 0, 0);
+    updateCamera();
+    autoRot = true; if(btnAuto) btnAuto.classList.add('on');
+  });
+  if(btnShot) btnShot.addEventListener('click', () => {
+    if(!renderer || !scene || !camera) return;
+    renderer.render(scene, camera);
+    const a = document.createElement('a');
+    a.download = 'audi_r8_alias.png';
+    a.href = canvasEl.toDataURL('image/png');
+    a.click();
+  });
+
+  document.querySelectorAll('.edot').forEach(dot => {
+    dot.addEventListener('click', function () {
+      document.querySelectorAll('.edot').forEach(d => d.classList.remove('on'));
+      this.classList.add('on');
+      envKey = this.dataset.env;
+      applyEnv();
+    });
+  });
+
+  function showErr(msg) { if(errEl) { errEl.textContent = msg; errEl.style.display = 'block'; } }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') { init(); }
+  else { document.addEventListener('DOMContentLoaded', init); }
+})();
+</script>
+</body>
+</html>
