@@ -10,7 +10,7 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg: #16171d; /* 스카이 셰이더 분위기에 맞춘 기본 배경색 */
+    --bg: #16171d;
     --surface: #1d1e26;
     --border: rgba(255,255,255,0.07);
     --accent: #b8a898;
@@ -94,7 +94,7 @@
     height:36px; display:flex; align-items:center; justify-content:space-between;
     padding:0 20px;
     border-top:0.5px solid var(--border);
-    background:rgba(22:17:23,0.95);
+    background:rgba(22,17,23,0.95);
     flex-shrink:0; z-index:20;
   }
   #bottombar span { font-size:10px; color:var(--text-dim); letter-spacing:0.05em; }
@@ -106,7 +106,7 @@
   <div id="topbar">
     <div id="logo">ALIAS 3D VIEWER</div>
     <div class="div"></div>
-    <div id="model-name">Audi R8 — OBJ/Blender Optimized Model</div>
+    <div id="model-name">Audi R8 — Surface Boundary Inspection Mode</div>
     <div id="btn-group">
       <div id="env-dots">
         <div class="edot on" style="background:#16171d;" data-env="sky" title="스카이 모드"></div>
@@ -131,9 +131,9 @@
     </div>
 
     <div id="hud">
-      좌클릭 드래그 — 카메라 회전 (마우스 수직 반전 적용)<br>
-      우클릭 드래그 / 마우스 휠 스크롤 — 줌 인 / 아웃<br>
-      휠 버튼(가운데) 클릭 드래그 — 화면 이동 (Panning)
+      좌클릭 드래그 — 카메라 회전 (수직 반전)<br>
+      우클릭 드래그 / 마우스 휠 — 줌 인/아웃<br>
+      마우스 오버 — 서피스 바운더리 체크 (파란색 하이라이트)
     </div>
     <div id="err"></div>
   </div>
@@ -154,15 +154,21 @@
   let model = null, edgeGroup = null;
   let autoRot = true, showPatch = false, envKey = 'sky';
 
-  // 💡 블렌더에서 넘어온 원본 재질 컬러를 극대화해주는 환경별 3방향 돔 라이팅 구성
+  // 마우스 오버 인터랙션(Raycasting)을 위한 전역 제어 변수
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  let intersectedMesh = null;
+  let originalMaterialColor = new THREE.Color();
+  let originalMaterialEmissive = new THREE.Color();
+
   const ENVS = {
     sky: { 
       bg: 0x16171d, 
       amb: 0.45,
       lights: [
-        { pos: [5, 12, 5], col: 0xffffff, int: 2.0 },   // 메인 하이라이트 탑 라이트
-        { pos: [-6, 4, -5], col: 0x9fb3c8, int: 1.2 },  // 은은한 하늘빛 사이드 반사광
-        { pos: [0, -8, 0], col: 0x473f35, int: 0.6 }    // 지면 언더 바운스광
+        { pos: [5, 12, 5], col: 0xffffff, int: 2.0 },
+        { pos: [-6, 4, -5], col: 0x9fb3c8, int: 1.2 },
+        { pos: [0, -8, 0], col: 0x473f35, int: 0.6 }
       ]
     },
     light: { 
@@ -240,243 +246,3 @@
 
       applyEnv();
       updateCamera();
-      animate();
-      onResize();
-      window.addEventListener('resize', onResize);
-      bindOrbit();
-
-      // 파일 로드 시작
-      loadGLB('audi_r8_modeling_1-19_GLB2.glb');
-    } catch (e) {
-      console.error(e);
-      showErr('뷰어 초기화 실패');
-    }
-  }
-
-  function applyEnv() {
-    const e = ENVS[envKey];
-    if(scene) scene.background = new THREE.Color(e.bg);
-    if(ambLight) ambLight.intensity = e.amb;
-    
-    dynamicLights.forEach((dl, idx) => {
-      if(e.lights[idx]) {
-        dl.position.set(...e.lights[idx].pos);
-        dl.color.set(e.lights[idx].col);
-        dl.intensity = e.lights[idx].int;
-        dl.visible = true;
-      } else {
-        dl.visible = false;
-      }
-    });
-  }
-
-  // 🛠️ 중요: 데이터 상의 재질을 파괴하지 않고, 셰이딩 품질(그림자 수신 및 양면 렌더링)만 업그레이드
-  function setupModelMaterials(root) {
-    root.traverse(child => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-
-        if (child.material) {
-          // 블렌더에서 추출된 고유 재질 속성을 완벽히 보존
-          child.material.side = THREE.DoubleSide; // 서피스 뒤집힘 현상 방지
-          
-          // 만약 블렌더에서 입혀온 재질이 너무 매트하거나 반사가 부족하다면 
-          // 아래 두 라인의 주석을 해제하여 미세 조율이 가능합니다.
-          // child.material.roughness = Math.max(child.material.roughness, 0.35);
-          // child.material.metalness = Math.max(child.material.metalness, 0.2);
-        }
-      }
-    });
-  }
-
-  function updateCamera() {
-    if(!camera) return;
-    const { theta, phi, radius, target } = orb;
-    const sp = Math.sin(phi);
-    
-    camera.position.set(
-      radius * sp * Math.sin(theta) + target.x,
-      radius * Math.cos(phi)        + target.y,
-      radius * sp * Math.cos(theta) + target.z
-    );
-    camera.lookAt(target);
-  }
-
-  function animate() {
-    requestAnimationFrame(animate);
-    if (autoRot && model) {
-      model.rotation.y += 0.002;
-      if (edgeGroup) edgeGroup.rotation.y = model.rotation.y;
-    }
-    if(renderer && scene && camera) renderer.render(scene, camera);
-  }
-
-  function onResize() {
-    if(!camera || !renderer || !wrap) return;
-    const W = wrap.clientWidth || window.innerWidth;
-    const H = wrap.clientHeight || window.innerHeight;
-    camera.aspect = W / H; camera.updateProjectionMatrix();
-    renderer.setSize(W, H);
-  }
-
-  // 🛠️ 마우스 수직 조작 반전(Invert Y) 로직이 온전하게 튜닝된 파트
-  function bindOrbit() {
-    let down = false; let activeMode = 0; let px = 0, py = 0;
-    
-    canvasEl.addEventListener('mousedown', e => {
-      down = true; px = e.clientX; py = e.clientY;
-      if (e.button === 1) activeMode = 1; 
-      else if (e.button === 2) activeMode = 2; 
-      else { activeMode = 0; autoRot = false; if(btnAuto) btnAuto.classList.remove('on'); }
-    });
-    
-    window.addEventListener('mouseup', () => { down = false; });
-    window.addEventListener('mousemove', e => {
-      if (!down) return;
-      const dx = e.clientX - px, dy = e.clientY - py;
-      px = e.clientX; py = e.clientY;
-      
-      if (activeMode === 1) { 
-        const offsetFactor = 0.0016 * orb.radius;
-        const vecRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-        const vecUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-        orb.target.addScaledVector(vecRight, -dx * offsetFactor);
-        orb.target.addScaledVector(vecUp, dy * offsetFactor);
-      } else if (activeMode === 2) {
-        orb.radius = Math.max(0.2, Math.min(200, orb.radius + dy * 0.015));
-      } else { 
-        // 🔄 수직 회전 조작 반전 처리: 마우스를 밑으로 당길 때(dy > 0) phi 값이 줄어들어 카메라가 루프 방향(위)으로 궤적 이동
-        orb.theta -= dx * 0.007; 
-        orb.phi = Math.max(0.05, Math.min(Math.PI - 0.05, orb.phi - dy * 0.007)); 
-      }
-      updateCamera();
-    });
-    
-    canvasEl.addEventListener('wheel', e => {
-      e.preventDefault();
-      orb.radius = Math.max(0.2, Math.min(200, orb.radius + e.deltaY * 0.012));
-      updateCamera();
-    }, { passive: false });
-    canvasEl.addEventListener('contextmenu', e => e.preventDefault());
-  }
-
-  function loadGLB(path) {
-    let prog = 0;
-    const ticker = setInterval(() => { prog = Math.min(prog + 4, 90); if(loadFill) loadFill.style.width = prog + '%'; }, 100);
-
-    const loader = new THREE.GLTFLoader();
-    
-    // 📦 블렌더에서 압축한 Draco GLB 파일을 웹 브라우저에서 풀 수 있도록 디코더 세팅 결합
-    const dracoLoader = new THREE.DRACOLoader();
-    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
-    loader.setDRACOLoader(dracoLoader);
-
-    loader.load(path, gltf => {
-      clearInterval(ticker);
-      if(loadFill) loadFill.style.width = '100%';
-
-      model = gltf.scene;
-      
-      // 원본 재질 속성 복원 셋업 함수 호출
-      setupModelMaterials(model);
-
-      const box  = new THREE.Box3().setFromObject(model);
-      const ctr  = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      const maxD = Math.max(size.x, size.y, size.z);
-      const sc   = 3.5 / maxD;
-      
-      model.position.sub(ctr).multiplyScalar(sc);
-      model.scale.setScalar(sc);
-      scene.add(model);
-
-      orb.radius = 5; orb.target.set(0, 0, 0); orb.theta = 0.5; orb.phi = 1.05;
-      updateCamera();
-
-      buildEdges(model);
-      setTimeout(() => { if(loadEl) loadEl.classList.add('hidden'); }, 300);
-
-    }, xhr => {
-      if (xhr.total && loadFill) { prog = Math.round(xhr.loaded / xhr.total * 90); loadFill.style.width = prog + '%'; }
-    }, err => {
-      clearInterval(ticker);
-      console.error(err);
-      showErr('모델 로드 실패: 파일명 혹은 압축 디코더 링크를 확인하세요.');
-    });
-  }
-
-  function buildEdges(root) {
-    if (edgeGroup) { scene.remove(edgeGroup); edgeGroup = null; }
-    edgeGroup = new THREE.Group();
-
-    root.traverse(child => {
-      if (!child.isMesh) return;
-      
-      const edges = new THREE.EdgesGeometry(child.geometry, 15);
-      const mat = new THREE.LineBasicMaterial({ 
-        color: 0x9095a5, 
-        transparent: true, 
-        opacity: 0.5,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1
-      });
-      
-      const lines = new THREE.LineSegments(edges, mat);
-      lines.renderOrder = 999;
-      lines.position.copy(child.position);
-      lines.rotation.copy(child.rotation);
-      lines.scale.copy(child.scale);
-      edgeGroup.add(lines);
-    });
-
-    edgeGroup.position.copy(root.position);
-    edgeGroup.rotation.copy(root.rotation);
-    edgeGroup.scale.copy(root.scale);
-    edgeGroup.visible = showPatch;
-    scene.add(edgeGroup);
-  }
-
-  if(btnAuto) btnAuto.addEventListener('click', () => { autoRot = !autoRot; btnAuto.classList.toggle('on', autoRot); });
-  if(btnPatch) btnPatch.addEventListener('click', () => {
-    showPatch = !showPatch;
-    btnPatch.classList.toggle('on', showPatch);
-    if (edgeGroup) edgeGroup.visible = showPatch;
-  });
-  
-  if(btnReset) btnReset.addEventListener('click', () => {
-    if (!model) return;
-    orb.radius = 5; orb.target.set(0, 0, 0); orb.theta = 0.5; orb.phi = 1.05;
-    model.rotation.set(0, 0, 0);
-    if (edgeGroup) edgeGroup.rotation.set(0, 0, 0);
-    updateCamera();
-    autoRot = true; if(btnAuto) btnAuto.classList.add('on');
-  });
-  
-  if(btnShot) btnShot.addEventListener('click', () => {
-    if(!renderer || !scene || !camera) return;
-    renderer.render(scene, camera);
-    const a = document.createElement('a');
-    a.download = 'audi_r8_capture.png';
-    a.href = canvasEl.toDataURL('image/png');
-    a.click();
-  });
-
-  document.querySelectorAll('.edot').forEach(dot => {
-    dot.addEventListener('click', function () {
-      document.querySelectorAll('.edot').forEach(d => d.classList.remove('on'));
-      this.classList.add('on');
-      envKey = this.dataset.env;
-      applyEnv();
-    });
-  });
-
-  function showErr(msg) { if(errEl) { errEl.textContent = msg; errEl.style.display = 'block'; } }
-
-  if (document.readyState === 'complete' || document.readyState === 'interactive') { init(); }
-  else { document.addEventListener('DOMContentLoaded', init); }
-})();
-</script>
-</body>
-</html>
