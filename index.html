@@ -221,16 +221,4 @@
 
   function applyEnv() {
     const e = ENVS[envKey];
-    if(scene) scene.background = new THREE.Color(e.bg);
-    if(ambLight) ambLight.intensity = e.amb;
-    if(dirLight1) dirLight1.color.set(e.dir1);
-    if(dirLight2) dirLight2.color.set(e.dir2);
-  }
-
-  function updateCamera() {
-    if(!camera) return;
-    const { theta, phi, radius, panX, panY } = orb;
-    const sp = Math.sin(phi);
-    camera.position.set(
-      radius * sp * Math.sin(theta) + panX,
-      radius * Math.cos(
+    if(scene) scene.background = new
