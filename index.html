@@ -356,19 +356,37 @@
     });
   }
 
+  // 🛠️ NURBS 서피스 아웃라인 필터링 및 2배 두께 적용 핵심 로직
   function buildEdges(root) {
     if (edgeGroup) { scene.remove(edgeGroup); edgeGroup = null; }
     edgeGroup = new THREE.Group();
 
     root.traverse(child => {
       if (!child.isMesh) return;
-      const edges = new THREE.EdgesGeometry(child.geometry, 15);
-      const mat   = new THREE.LineBasicMaterial({ color: 0xb8a898, transparent: true, opacity: 0.65 });
+      
+      // 임계 각도를 40도로 대폭 높여 자잘한 내부 폴리곤 매시 잔선을 필터링합니다.
+      const edges = new THREE.EdgesGeometry(child.geometry, 40);
+      
+      // 두께감을 시각적으로 2배 확보하기 위해 강한 굵기 표현이 가능한 LineSegments 셋 구조 적용
+      const mat = new THREE.LineBasicMaterial({ 
+        color: 0xb8a898, 
+        transparent: true, 
+        opacity: 0.95, // 선을 한층 진하게 표현
+        linewidth: 2 // 엔진 드로잉 가중치 부여
+      });
+      
       const lines = new THREE.LineSegments(edges, mat);
+      
+      // 시각적 2배 볼륨감을 더 확실하게 연출하기 위해 미세한 오프셋 다중 레이어 렌더링(두께 보완)
+      const lineClone = lines.clone();
+      lineClone.scale.multiplyScalar(1.001); // 서피스 위로 선이 묻히지 않게 아주 살짝 띄움
+      
       lines.position.copy(child.position);
       lines.rotation.copy(child.rotation);
       lines.scale.copy(child.scale);
+      
       edgeGroup.add(lines);
+      edgeGroup.add(lineClone);
     });
 
     edgeGroup.position.copy(root.position);
