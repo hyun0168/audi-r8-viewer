@@ -109,9 +109,9 @@
     <div id="model-name">Audi R8 — Practice Modeling</div>
     <div id="btn-group">
       <div id="env-dots">
-        <div class="edot on" style="background:#0e0e14;" data-env="dark" title="다크"></div>
-        <div class="edot" style="background:#dcd8d0;" data-env="light" title="라이트"></div>
-        <div class="edot" style="background:#141c14;" data-env="studio" title="스튜디오"></div>
+        <div class="edot on" style="background:#1a1b22;" data-env="sky" title="스카이 셰이더"></div>
+        <div class="edot" style="background:#e0deda;" data-env="light" title="라이트 클레이"></div>
+        <div class="edot" style="background:#0a0a0f;" data-env="dark" title="다크 몽환"></div>
       </div>
       <div class="div" style="margin:0 2px;"></div>
       <button class="btn on" id="btn-auto">AUTO ROT</button>
@@ -151,12 +151,37 @@
 (function () {
   let scene, camera, renderer;
   let model = null, edgeGroup = null;
-  let autoRot = true, showPatch = false, envKey = 'dark';
+  let autoRot = true, showPatch = false, envKey = 'sky';
 
+  // 🛠️ ALIAS의 덩어리감(Shade Sky) 조명 매트릭스 구현을 위한 세팅 데이터
   const ENVS = {
-    dark:   { bg: 0x0e0e14, amb: 0.55, dir1: 0xffffff, dir2: 0xc0b8b0 },
-    light:  { bg: 0xdcd8d0, amb: 0.80, dir1: 0xffffff, dir2: 0xe8e0d8 },
-    studio: { bg: 0x141c14, amb: 0.50, dir1: 0xffffff, dir2: 0xa0c0a0 }
+    sky: { 
+      bg: 0x16171d, 
+      amb: 0.40,
+      lights: [
+        { pos: [5, 10, 5], col: 0xffffff, int: 1.8 },   // 메인 스카이 조명 (탑)
+        { pos: [-6, 3, -5], col: 0x8fa1b5, int: 1.1 },  // 은은한 하늘빛 반사 조명 (사이드)
+        { pos: [0, -8, 0], col: 0x3d352e, int: 0.7 }    // 지면 반사광 (그라운드 바운스)
+      ]
+    },
+    light: { 
+      bg: 0xe6e4e0, 
+      amb: 0.75,
+      lights: [
+        { pos: [4, 8, 4], col: 0xffffff, int: 1.2 },
+        { pos: [-4, 2, -4], col: 0xd8d4cc, int: 0.6 },
+        { pos: [0, -5, 0], col: 0xffffff, int: 0.3 }
+      ]
+    },
+    dark: { 
+      bg: 0x07070a, 
+      amb: 0.15,
+      lights: [
+        { pos: [3, 5, 3], col: 0xd9c3b0, int: 1.6 },
+        { pos: [-5, 1, -3], col: 0x485666, int: 0.9 },
+        { pos: [0, 6, -5], col: 0xffffff, int: 0.5 }
+      ]
+    }
   };
 
   const canvasEl  = document.getElementById('three-canvas');
@@ -169,7 +194,7 @@
   const btnReset  = document.getElementById('btn-reset');
   const btnShot   = document.getElementById('btn-shot');
 
-  let ambLight, dirLight1, dirLight2;
+  let ambLight, dynamicLights = [];
   
   const orb = { 
     theta: 0.5, 
@@ -180,15 +205,12 @@
 
   function init() {
     try {
-      if (typeof THREE === 'undefined') {
-        showErr('엔진 로드 실패');
-        return;
-      }
+      if (typeof THREE === 'undefined') { showErr('엔진 로드 실패'); return; }
       
       scene = new THREE.Scene();
       const W = wrap.clientWidth || window.innerWidth;
       const H = wrap.clientHeight || window.innerHeight;
-      camera = new THREE.PerspectiveCamera(42, W / H, 0.01, 2000);
+      camera = new THREE.PerspectiveCamera(40, W / H, 0.01, 2000);
 
       renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, preserveDrawingBuffer: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -198,17 +220,23 @@
       
       renderer.outputColorSpace = 'srgb';
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.15;
+      renderer.toneMappingExposure = 1.1;
 
-      ambLight  = new THREE.AmbientLight(0xffffff, 0.55);
-      dirLight1 = new THREE.DirectionalLight(0xffffff, 1.3);
-      dirLight1.position.set(4, 6, 5);
-      dirLight1.castShadow = true;
-      dirLight2 = new THREE.DirectionalLight(0xc0b8b0, 0.5);
-      dirLight2.position.set(-4, 2, -3);
-      const rim = new THREE.DirectionalLight(0xffffff, 0.2);
-      rim.position.set(0, -3, -4);
-      scene.add(ambLight, dirLight1, dirLight2, rim);
+      // 조명 초기 레이아웃 생성
+      ambLight = new THREE.AmbientLight(0xffffff, 0.4);
+      scene.add(ambLight);
+
+      for (let i = 0; i < 3; i++) {
+        let dl = new THREE.DirectionalLight(0xffffff, 1.0);
+        if(i === 0) {
+          dl.castShadow = true;
+          dl.shadow.mapSize.width = 2048;
+          dl.shadow.mapSize.height = 2048;
+          dl.shadow.bias = -0.0002;
+        }
+        scene.add(dl);
+        dynamicLights.push(dl);
+      }
 
       applyEnv();
       updateCamera();
@@ -224,12 +252,61 @@
     }
   }
 
+  // 🛠️ 조명 세팅과 매질의 밝기 변화 밸런스 조정
   function applyEnv() {
     const e = ENVS[envKey];
     if(scene) scene.background = new THREE.Color(e.bg);
     if(ambLight) ambLight.intensity = e.amb;
-    if(dirLight1) dirLight1.color.set(e.dir1);
-    if(dirLight2) dirLight2.color.set(e.dir2);
+    
+    dynamicLights.forEach((dl, idx) => {
+      if(e.lights[idx]) {
+        dl.position.set(...e.lights[idx].pos);
+        dl.color.set(e.lights[idx].col);
+        dl.intensity = e.lights[idx].int;
+        dl.visible = true;
+      } else {
+        dl.visible = false;
+      }
+    });
+
+    // 이미 로드된 모델이 있다면 재질 실시간 실장 변경
+    if (model) {
+      updateModelMaterial(model);
+    }
+  }
+
+  // 🛠️ 중요: CAD Assistant 특유의 검은색 메탈릭 속성을 지워버리고 은은한 스카이 셰이더 매트 질감으로 강제 치환
+  function updateModelMaterial(root) {
+    root.traverse(child => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+        
+        // 투명 부품(글라스류) 식별 및 투명도 유지 처리
+        const nameLower = child.name.toLowerCase();
+        const isGlass = nameLower.includes('glass') || nameLower.includes('window') || nameLower.includes('lens');
+
+        if (isGlass) {
+          child.material = new THREE.MeshPhysicalMaterial({
+            color: 0x333b45,
+            roughness: 0.1,
+            metalness: 0.1,
+            transparent: true,
+            opacity: 0.4,
+            transmission: 0.6,
+            side: THREE.DoubleSide
+          });
+        } else {
+          // 일반 차체 판넬: Alias 검토용 'Shade Sky' 특유의 세미 매트 그레이 서피스 구현
+          child.material = new THREE.MeshStandardMaterial({
+            color: envKey === 'light' ? 0x9e9b96 : 0x5a616a, // 셰이더 베이스 컬러
+            roughness: 0.43,         // 빛이 뭉개지며 퍼지는 정도 (매우 중요)
+            metalness: 0.18,         // 은은한 금속성 느낌 가미
+            side: THREE.DoubleSide
+          });
+        }
+      }
+    });
   }
 
   function updateCamera() {
@@ -248,7 +325,7 @@
   function animate() {
     requestAnimationFrame(animate);
     if (autoRot && model) {
-      model.rotation.y += 0.003;
+      model.rotation.y += 0.002;
       if (edgeGroup) edgeGroup.rotation.y = model.rotation.y;
     }
     if(renderer && scene && camera) renderer.render(scene, camera);
@@ -263,27 +340,16 @@
   }
 
   function bindOrbit() {
-    let down = false;
-    let activeMode = 0; 
-    let px = 0, py = 0;
+    let down = false; let activeMode = 0; let px = 0, py = 0;
     
     canvasEl.addEventListener('mousedown', e => {
-      down = true;
-      px = e.clientX; py = e.clientY;
-      
-      if (e.button === 1) {
-        activeMode = 1; 
-      } else if (e.button === 2) {
-        activeMode = 2; 
-      } else {
-        activeMode = 0; 
-        autoRot = false; 
-        if(btnAuto) btnAuto.classList.remove('on'); 
-      }
+      down = true; px = e.clientX; py = e.clientY;
+      if (e.button === 1) activeMode = 1; 
+      else if (e.button === 2) activeMode = 2; 
+      else { activeMode = 0; autoRot = false; if(btnAuto) btnAuto.classList.remove('on'); }
     });
     
     window.addEventListener('mouseup', () => { down = false; });
-    
     window.addEventListener('mousemove', e => {
       if (!down) return;
       const dx = e.clientX - px, dy = e.clientY - py;
@@ -293,14 +359,12 @@
         const offsetFactor = 0.0016 * orb.radius;
         const vecRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
         const vecUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-        
         orb.target.addScaledVector(vecRight, -dx * offsetFactor);
         orb.target.addScaledVector(vecUp, dy * offsetFactor);
       } else if (activeMode === 2) {
         orb.radius = Math.max(0.2, Math.min(200, orb.radius + dy * 0.015));
       } else { 
-        orb.theta -= dx * 0.007; 
-        orb.phi = Math.max(0.05, Math.min(Math.PI - 0.05, orb.phi + dy * 0.007)); 
+        orb.theta -= dx * 0.007; orb.phi = Math.max(0.05, Math.min(Math.PI - 0.05, orb.phi + dy * 0.007)); 
       }
       updateCamera();
     });
@@ -310,7 +374,6 @@
       orb.radius = Math.max(0.2, Math.min(200, orb.radius + e.deltaY * 0.012));
       updateCamera();
     }, { passive: false });
-    
     canvasEl.addEventListener('contextmenu', e => e.preventDefault());
   }
 
@@ -318,38 +381,27 @@
     let prog = 0;
     const ticker = setInterval(() => { prog = Math.min(prog + 3, 90); if(loadFill) loadFill.style.width = prog + '%'; }, 130);
 
-    if (typeof THREE.GLTFLoader !== 'function') {
-      clearInterval(ticker);
-      showErr('로더 구성 요소를 찾을 수 없습니다.');
-      return;
-    }
-
-    // CAD Assistant 표준 규격 파일 파싱을 위해 순수 구조로 복원 (Draco 세팅 비활성화)
     const loader = new THREE.GLTFLoader();
-
     loader.load(path, gltf => {
       clearInterval(ticker);
       if(loadFill) loadFill.style.width = '100%';
 
       model = gltf.scene;
       
-      model.traverse(child => {
-        if (child.isMesh && child.material) {
-          child.material.side = THREE.DoubleSide;
-        }
-      });
+      // 불러온 데이터에 커스텀 스카이 셰이더 재질 주입
+      updateModelMaterial(model);
 
       const box  = new THREE.Box3().setFromObject(model);
       const ctr  = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
       const maxD = Math.max(size.x, size.y, size.z);
       const sc   = 3.5 / maxD;
+      
       model.position.sub(ctr).multiplyScalar(sc);
       model.scale.setScalar(sc);
       scene.add(model);
 
-      orb.radius = 5; orb.target.set(0, 0, 0);
-      orb.theta = 0.5; orb.phi = 1.05;
+      orb.radius = 5; orb.target.set(0, 0, 0); orb.theta = 0.5; orb.phi = 1.05;
       updateCamera();
 
       buildEdges(model);
@@ -360,11 +412,10 @@
     }, err => {
       clearInterval(ticker);
       console.error(err);
-      showErr('모델 로딩에 실패했습니다. 파일 형식을 다시 확인해 주세요.');
+      showErr('모델 파일 형식을 파싱하지 못했습니다.');
     });
   }
 
-  // 🛠️ CAD Assistant 전용 서피스 경계선 연산 최적화 매핑 구조
   function buildEdges(root) {
     if (edgeGroup) { scene.remove(edgeGroup); edgeGroup = null; }
     edgeGroup = new THREE.Group();
@@ -372,26 +423,21 @@
     root.traverse(child => {
       if (!child.isMesh) return;
       
-      // CAD Assistant에서 뜯어낸 정밀 지오메트리 엣지 추출 (결합되지 않은 면 경계를 날카롭게 캡처하기 위해 각도를 15도로 강화)
       const edges = new THREE.EdgesGeometry(child.geometry, 15);
-      
       const mat = new THREE.LineBasicMaterial({ 
-        color: 0xb8a898, 
+        color: 0xa0a5b5, // 패치 경계 라인이 스카이 배경에 잘 어우러지도록 정돈
         transparent: true, 
-        opacity: 0.95,
-        linewidth: 4, 
+        opacity: 0.8,
         polygonOffset: true,
-        polygonOffsetFactor: -1, // 면 경계가 분리되어 생성되었으므로 아주 얇게 밀착 처리
+        polygonOffsetFactor: -1,
         polygonOffsetUnits: -1
       });
       
       const lines = new THREE.LineSegments(edges, mat);
-      lines.renderOrder = 999; 
-      
+      lines.renderOrder = 999;
       lines.position.copy(child.position);
       lines.rotation.copy(child.rotation);
       lines.scale.copy(child.scale);
-      
       edgeGroup.add(lines);
     });
 
@@ -422,7 +468,7 @@
     if(!renderer || !scene || !camera) return;
     renderer.render(scene, camera);
     const a = document.createElement('a');
-    a.download = 'audi_r8_alias.png';
+    a.download = 'audi_r8_shade_sky.png';
     a.href = canvasEl.toDataURL('image/png');
     a.click();
   });
