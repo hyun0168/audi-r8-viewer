@@ -171,7 +171,14 @@
   const btnShot   = document.getElementById('btn-shot');
 
   let ambLight, dirLight1, dirLight2;
-  const orb = { theta: 0.5, phi: 1.05, radius: 5, panX: 0, panY: 0 };
+  
+  // 회전 중심축을 동적으로 제어하기 위해 3차원 Vector 구조(target)로 관리 구조를 변경합니다.
+  const orb = { 
+    theta: 0.5, 
+    phi: 1.05, 
+    radius: 5, 
+    target: new THREE.Vector3(0, 0, 0) 
+  };
 
   function init() {
     try {
@@ -227,16 +234,18 @@
     if(dirLight2) dirLight2.color.set(e.dir2);
   }
 
+  // 회전 중심(orb.target)을 기준으로 구면 좌표계를 실시간 매핑하는 완전 변형 함수
   function updateCamera() {
     if(!camera) return;
-    const { theta, phi, radius, panX, panY } = orb;
+    const { theta, phi, radius, target } = orb;
     const sp = Math.sin(phi);
+    
     camera.position.set(
-      radius * sp * Math.sin(theta) + panX,
-      radius * Math.cos(phi)        + panY,
-      radius * sp * Math.cos(theta)
+      radius * sp * Math.sin(theta) + target.x,
+      radius * Math.cos(phi)        + target.y,
+      radius * sp * Math.cos(theta) + target.z
     );
-    camera.lookAt(panX, panY, 0);
+    camera.lookAt(target);
   }
 
   function animate() {
@@ -266,11 +275,11 @@
       px = e.clientX; py = e.clientY;
       
       if (e.button === 1) {
-        activeMode = 1; 
+        activeMode = 1; // 패닝 (가운데 휠 드래그)
       } else if (e.button === 2) {
-        activeMode = 2; 
+        activeMode = 2; // 줌 (우클릭 드래그)
       } else {
-        activeMode = 0; 
+        activeMode = 0; // 회전 (좌클릭 드래그)
         autoRot = false; 
         if(btnAuto) btnAuto.classList.remove('on'); 
       }
@@ -284,8 +293,13 @@
       px = e.clientX; py = e.clientY;
       
       if (activeMode === 1) { 
-        orb.panX -= dx * 0.0025 * (orb.radius / 4); 
-        orb.panY += dy * 0.0025 * (orb.radius / 4); 
+        // 🛠️ 카메라 정면/우측 벡터를 기반으로 마우스 드래그 방향에 맞춰 Target을 직접 이동시킵니다.
+        const offsetFactor = 0.0016 * orb.radius;
+        const vecRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        const vecUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+        
+        orb.target.addScaledVector(vecRight, -dx * offsetFactor);
+        orb.target.addScaledVector(vecUp, dy * offsetFactor);
       } else if (activeMode === 2) {
         orb.radius = Math.max(0.2, Math.min(200, orb.radius + dy * 0.015));
       } else { 
@@ -340,7 +354,7 @@
       model.scale.setScalar(sc);
       scene.add(model);
 
-      orb.radius = 5; orb.panX = 0; orb.panY = 0;
+      orb.radius = 5; orb.target.set(0, 0, 0);
       orb.theta = 0.5; orb.phi = 1.05;
       updateCamera();
 
@@ -365,11 +379,12 @@
       
       const edges = new THREE.EdgesGeometry(child.geometry, 40);
       
+      // 🛠️ 1번 요구사항 반영: 두께를 선명하게 2배 더 확장 (linewidth: 2 -> 4)
       const mat = new THREE.LineBasicMaterial({ 
         color: 0xb8a898, 
         transparent: true, 
         opacity: 0.95,
-        linewidth: 2,
+        linewidth: 4, 
         polygonOffset: true,
         polygonOffsetFactor: -2, 
         polygonOffsetUnits: -2
@@ -399,10 +414,9 @@
     if (edgeGroup) edgeGroup.visible = showPatch;
   });
   
-  // 🛠️ 오타 완벽 수정 부 (btnAuto.classList.add로 정상화)
   if(btnReset) btnReset.addEventListener('click', () => {
     if (!model) return;
-    orb.radius = 5; orb.panX = 0; orb.panY = 0; orb.theta = 0.5; orb.phi = 1.05;
+    orb.radius = 5; orb.target.set(0, 0, 0); orb.theta = 0.5; orb.phi = 1.05;
     model.rotation.set(0, 0, 0);
     if (edgeGroup) edgeGroup.rotation.set(0, 0, 0);
     updateCamera();
